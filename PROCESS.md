@@ -64,8 +64,10 @@ MetalFX frame interpolation can't be used at this point in the pipeline: the pre
 
 ```bash
 cd ~/nxnative-build
+git fetch origin
+git checkout 90fc507da7
 git checkout -b framegen-experiment
-git apply framegen-stage1-v5.patch
+git apply framegen-stage1-v6-90fc507.patch
 make -C dm/host GAME=0400486024DEC000
 python3 scripts/build_ipa_from_nsp.py "<folder with your game dump>" --platform mac-app
 ```
@@ -91,8 +93,14 @@ So v5 measures the cadence instead of assuming it. The gap between takes, in lin
 
 Before any code, a test matrix was written down: steady 60/59/55/50/45/40/30 each have to lock the right k within about 2 s; each of those with a 30↔60 swing and a loading stall must never engage, or must drop out fast; real fps with generation on has to stay at least 97% of off; empty link ticks stay near zero. The cap decision came from the measurement, not preference: MAXK was first going to be 3 (added latency stays under 17 ms), until the field's locked 30 was confirmed — k = 3 doesn't cover the one real case, so MAXK = 4, accepting +25 ms of hold latency and blends spanning ~33 ms of motion in that band. If field testing shows the k = 4 picture is too smeary in combat, MAXK = 3 is the documented fallback. Status, stated plainly: the v5 patch is written and verified to apply cleanly against upstream; the field run against the test matrix is the verification still to be done, and this section gets its results when they exist.
 
+## Step 7 — v6: assertion, clock stepping, and a new upstream
+
+v6 (2026-11-19) folded three changes into v5: a latency-activity assertion (`DM_LATENCY_ACTIVITY`) that checks the presented-time accounting while generation runs; blend stepping driven by the display-link clock instead of counting planned blends; and a backoff reset, so an engagement after a long healthy run starts from the shortest re-engage wait rather than a doubled one. It was built against upstream `a2b819f`.
+
+Upstream then moved fast — 400 commits in six days, including a rewrite of the present/pacing code the patch hooks into: a new present-history API, an extra `present_now` parameter, tick-based holds, and upstream's own 40 fps frame-step for this game. By 2026-11-23 the v6 patch no longer applied. This file is v6 hand-ported onto upstream `90fc507da7`: of the 421 lines v6 adds to `nvn_mtl.m`, 408 are verbatim and the rest are adapted to the new history API and signature, with the generation hold still switching off while generation is engaged. Verified to apply cleanly to that commit, with the same internal counts as the `a2b819f` build. Status, stated plainly: not yet built or field-run on the new base — the compile check and a field session are the verification still to be done.
+
 ## What it is, honestly
 
 120 displayed over the game's own rate — 60 rendered in most places, 30 rendered in field combat. Motion has more steps; input response stays at the game's rate plus the hold (one tick at 60, up to three at a locked 30). Fast camera spins ghost, worst at the wide cadences — warping with motion data is the stage 2 that would fix that. It does nothing for a rate that can't hold still; the market fix above is what restored a stable rate there. The fixes stack; they are not the same trick.
 
-*Found, measured, built and tested on a base M5 by Prashant ([@PrashantJi02](https://github.com/PrashantJi02)); the base project is [seedds/nxnative](https://github.com/seedds/nxnative), and the market diagnosis was confirmed by lunks on issue #1985. The patch was iterated across five versions with AI assistance in drafting the code; every build, test and measurement was run on the real machine.*
+*Found, measured, built and tested on a base M5 by Prashant ([@PrashantJi02](https://github.com/PrashantJi02)); the base project is [seedds/nxnative](https://github.com/seedds/nxnative), and the market diagnosis was confirmed by lunks on issue #1985. The patch was iterated across six versions with AI assistance in drafting the code; every build, test and measurement was run on the real machine.*

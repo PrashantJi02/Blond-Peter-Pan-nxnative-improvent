@@ -51,7 +51,8 @@ The display therefore shows ~120 pictures per second whether the game is steppin
 - **v2** added the engagement gate, but the held-frame code consumed the tick counter the cadence check needed — generation blinked on alternate frames and the HUD read exactly 80 fps. Fixed by leaving the counters to the takes.
 - **v3** fixed the gate being hair-triggered: ordinary jitter (a 17 ms frame landing 3 ticks later) dropped generation instantly and it never came back during play — 120 only while standing still. Fixed with jitter tolerance and a 0.5 s re-engagement.
 - **v4** added slow-frame forgiveness, a GPU/load watchdog with a doubling backoff, and a bounded 2 ms wait for the blend allocator (v1–v3 could in principle block the display-link thread indefinitely there).
-- **v5** (this file) makes the cadence adaptive: k is measured (2, 3 or 4 ticks, capped by MAXK = 4) instead of assuming 60, and the blend fraction steps across the gap (½; ⅓/⅔; ¼/½/¾). Written against a test matrix before any code: steady 60/59/55/50/45/40/30 must each lock a k within ~2 s; 30↔60 swings and loading stalls must never engage (and must drop out fast); real fps with generation on must stay within 97% of off; empty link ticks stay near zero. The locked-30 band exists because of a measured case — Hyrule Field combat — not as a hypothetical. If the k = 4 picture proves too smeary in testing, capping MAXK at 3 (latency under 17 ms, stable ~40 and up) is the fallback; the field verification is the test that decides.
+- **v5** makes the cadence adaptive: k is measured (2, 3 or 4 ticks, capped by MAXK = 4) instead of assuming 60, and the blend fraction steps across the gap (½; ⅓/⅔; ¼/½/¾). Written against a test matrix before any code: steady 60/59/55/50/45/40/30 must each lock a k within ~2 s; 30↔60 swings and loading stalls must never engage (and must drop out fast); real fps with generation on must stay within 97% of off; empty link ticks stay near zero. The locked-30 band exists because of a measured case — Hyrule Field combat — not as a hypothetical. If the k = 4 picture proves too smeary in testing, capping MAXK at 3 (latency under 17 ms, stable ~40 and up) is the fallback; the field verification is the test that decides.
+- **v6** (this file) adds three things on top of v5: a latency-activity assertion (`DM_LATENCY_ACTIVITY`) that checks the presented-time accounting stays consistent while generation runs; blend stepping driven by the display-link clock instead of counting planned blends; and a backoff reset, so an engagement that follows a long healthy run starts from the shortest re-engage wait instead of a doubled one. First built against upstream `a2b819f`. This file is the same v6 hand-ported to upstream `90fc507da7` (2026-11-23), after upstream rewrote the present/pacing code the patch hooks into — it is pinned to that commit, and verified to apply cleanly to it; it has not been built or field-run on the new base yet.
 
 ---
 
@@ -75,12 +76,14 @@ DM_FRAMEGEN=1
 
 ### Applying the patch and building
 
-Against a current clone of seedds/nxnative (the patch applies to upstream HEAD as of 2026-11-10):
+Against a clone of seedds/nxnative checked out at the pinned commit (the patch applies to upstream `90fc507da7`, 2026-11-23 — later upstream commits may not apply, because upstream is rewriting the present/pacing code this patch hooks into):
 
 ```bash
 cd ~/nxnative-build
+git fetch origin
+git checkout 90fc507da7
 git checkout -b framegen-experiment
-git apply framegen-stage1-v5.patch
+git apply framegen-stage1-v6-90fc507.patch
 make -C dm/host GAME=0400486024DEC000
 python3 scripts/build_ipa_from_nsp.py "<folder with your game dump>" --platform mac-app
 ```
@@ -101,7 +104,7 @@ The `make` step is a compile check; it ends with warnings, not errors, when the 
 120 displayed, the game's own rate rendered. At 60, half the pictures are generated blends; at a locked 30, three quarters are. That is what frame generation means, DLSS included. Motion genuinely has more steps; responsiveness stays at the game's rate.
 
 **The field drops to 30 in combat. Is that this patch failing?**
-No — that's the game frame-stepping to its 30 mode under load, and it's exactly what v5's k = 4 band is for: a *stable* 30 gets multiplied like any other stable rate. What generation still won't touch is a rate that won't sit still.
+No — that's the game frame-stepping to its 30 mode under load, and it's exactly what v6's k = 4 band is for: a *stable* 30 gets multiplied like any other stable rate. What generation still won't touch is a rate that won't sit still.
 
 **The market is still slow for me.**
 Frame generation will not help there — the market problem was instability plus the thread-budget throttling, not a stable low rate. Do the `DM_RT=0` fix first.
@@ -115,4 +118,4 @@ Not at the moment. It is a local experiment. If it ever goes further it needs th
 ## Credits
 
 - [seedds/nxnative](https://github.com/seedds/nxnative) is the project that makes any of this possible; the market diagnosis was confirmed and sharpened by lunks on issue #1985.
-- Found, measured, built and tested on a base M5 by Prashant ([@PrashantJi02](https://github.com/PrashantJi02)), iterating the patch design across five versions with AI assistance in drafting the code. Every build, test and measurement in this repo was run on the real machine.
+- Found, measured, built and tested on a base M5 by Prashant ([@PrashantJi02](https://github.com/PrashantJi02)), iterating the patch design across six versions with AI assistance in drafting the code. Every build, test and measurement in this repo was run on the real machine.
